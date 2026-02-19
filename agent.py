@@ -17,21 +17,21 @@ def build_pr_agent():
     summary_subagent = {
         "name": "summary-agent",
         "description": (
-            "Summarizes the git patch history into a clear PR title, high-level "
-            "summary, key files changed, and main types of changes. Receives the "
-            "full patch text in the task and should analyze it directly."
+            "ALWAYS call this subagent FIRST before writing any PR. "
+            "It reads git patch text and returns: a PR title, a 2-4 sentence summary, "
+            "a list of key files changed, and the main change types (feature/fix/refactor/docs). "
+            "Do NOT write the PR without calling this first."
         ),
         "system_prompt": (
             "You are a specialist in summarizing git patches into concise, "
             "reviewer-friendly descriptions.\n\n"
             "You will receive the full patch text (git format-patch output) in your "
-            "task. Use it to:\n"
-            "- Propose a strong PR title.\n"
-            "- Provide a 2–4 sentence high-level summary of what changed and why.\n"
-            "- Identify the most important files or areas of the codebase touched.\n"
-            "- Identify the main types of changes (feature, fix, refactor, docs, etc.).\n\n"
-            "Respond with a concise summary suitable for the main agent to fold into "
-            "a final PR description."
+            "task. Analyze it and return your response in this EXACT format:\n\n"
+            "TITLE: <one-line PR title>\n"
+            "SUMMARY: <2-4 sentences describing what changed and why>\n"
+            "FILES: <comma-separated list of the most important files changed>\n"
+            "CHANGE_TYPES: <comma-separated labels: feature, fix, refactor, docs, test, chore>\n\n"
+            "Keep your total response under 300 words. Do not add extra sections."
         ),
         "tools": [],
     }
@@ -39,35 +39,40 @@ def build_pr_agent():
     implications_subagent = {
         "name": "implications-agent",
         "description": (
-            "Analyzes the git patches for breaking changes, migrations, dependency "
-            "and configuration changes, testing evidence, and overall risk. Receives "
-            "the full patch text in the task."
+            "ALWAYS call this subagent SECOND before writing any PR. "
+            "It reads git patch text and returns: breaking changes, migration steps, "
+            "dependency/config changes, testing evidence, and risk level. "
+            "Do NOT write the PR without calling this first."
         ),
         "system_prompt": (
             "You analyze the impact and risk of code changes.\n\n"
-            "You will receive the full patch text in your task. Look for:\n"
-            "- Breaking or behavior-changing modifications.\n"
-            "- Required migrations (DB schema, data, config keys, feature flags).\n"
-            "- Dependency or infrastructure changes.\n"
-            "- Added or modified tests and how thoroughly things were validated.\n"
-            "- Any areas that are particularly risky.\n\n"
-            "Return findings in concise bullet points that can be plugged into PR "
-            "sections for breaking changes, migrations, testing, and risk."
+            "You will receive the full patch text in your task. Analyze it and return "
+            "your response in this EXACT format:\n\n"
+            "BREAKING: <bullet list of breaking changes, or 'None'>\n"
+            "MIGRATIONS: <bullet list of required migration steps, or 'None'>\n"
+            "DEPS_CONFIG: <bullet list of dependency or config changes, or 'None'>\n"
+            "TESTING: <bullet list of tests added/modified and coverage evidence, or 'None'>\n"
+            "RISK: <low | medium | high>\n\n"
+            "Keep your total response under 300 words. Do not add extra sections."
         ),
         "tools": [],
     }
 
     system_prompt = (
-        "You are a PR generation assistant using subagents.\n\n"
-        "Workflow:\n"
-        "1. The user message includes PATCH_CONTEXT between explicit markers.\n"
-        "2. Delegate to `summary-agent` with the patch context in the task text.\n"
-        "3. Delegate to `implications-agent` with the patch context in the task text.\n"
-        "4. Combine the subagents' outputs into a single, well-structured PR "
-        "   description in Markdown.\n\n"
-        "Use headings like `## Summary`, `## Changes`, `## Breaking changes`, "
-        "`## Testing`, and `## Risks & roll-out`. Keep the description focused on "
-        "what matters for reviewers and downstream users.\n"
+        "You are a PR generation assistant. You MUST follow these steps in order "
+        "and MUST NOT skip any step:\n\n"
+        "STEP 1 — MANDATORY: Call task(name='summary-agent', task='<paste the full "
+        "patch text from BEGIN_PATCH_CONTEXT to END_PATCH_CONTEXT here>'). "
+        "Wait for the result before proceeding.\n\n"
+        "STEP 2 — MANDATORY: Call task(name='implications-agent', task='<paste the "
+        "same full patch text here>'). "
+        "Wait for the result before proceeding.\n\n"
+        "STEP 3: Use the outputs from BOTH subagents to compose the final PR "
+        "description in Markdown with these headings: ## Summary, ## Changes, "
+        "## Breaking changes, ## Testing, ## Risks & roll-out.\n\n"
+        "IMPORTANT: Do NOT write the PR description before completing STEP 1 and "
+        "STEP 2. Skipping the subagent calls is not allowed. "
+        "Your first action must always be a task() call to summary-agent."
     )
 
     checkpointer = MemorySaver()

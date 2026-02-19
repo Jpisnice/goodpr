@@ -115,8 +115,10 @@ def main() -> None:
             "BEGIN_PATCH_CONTEXT\n"
             f"{patch_context}\n"
             "END_PATCH_CONTEXT\n\n"
-            "Delegate to summary-agent and implications-agent using this patch context, "
-            "then produce the final PR description only."
+            "IMPORTANT: Before writing any PR, you MUST call task(name='summary-agent', ...) "
+            "and task(name='implications-agent', ...) with the full patch text above. "
+            "Only after receiving both outputs should you write the final Markdown PR. "
+            "Do NOT skip the subagent calls."
         ),
     }
 
