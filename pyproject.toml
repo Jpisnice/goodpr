@@ -1,0 +1,22 @@
+[project]
+name = "goodpr"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "deepagents>=0.4.1",
+    "langchain>=1.2.10",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+goodpr = "main:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "agent"]
+packages = ["tools"]
