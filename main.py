@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()  # Load .env so GOOGLE_API_KEY is set before the agent runs
 
 from agent import build_pr_agent
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from tools.git_tools import GitPatchError, get_patch_history
 
 try:
@@ -101,6 +101,16 @@ def main() -> None:
 
     LOG.info("Patch context length: %d chars", len(patch_context))
 
+    # Write the patch to a file so subagents can read it without needing
+    # the main agent to copy massive text into task() call arguments.
+    patch_file = Path("patch_context.txt").resolve()
+    patch_file.write_text(patch_context, encoding="utf-8")
+    # Use forward slashes so the path survives intact through LLM tool call arguments
+    # on Windows (backslashes get treated as escape sequences when the model serialises
+    # the task() string and read_patch_file receives a mangled path).
+    patch_file_posix = patch_file.as_posix()
+    LOG.info("Patch written to %s", patch_file_posix)
+
     agent = build_pr_agent()
 
     thread_id = args.thread_id or str(uuid.uuid4())
@@ -110,15 +120,13 @@ def main() -> None:
         "role": "user",
         "content": (
             f"Generate a professional pull request description in Markdown for the "
-            f"last {commit_offset} commits in the repository at {resolved_path}. "
-            "The patch context is included below.\n\n"
-            "BEGIN_PATCH_CONTEXT\n"
-            f"{patch_context}\n"
-            "END_PATCH_CONTEXT\n\n"
-            "IMPORTANT: Before writing any PR, you MUST call task(name='summary-agent', ...) "
-            "and task(name='implications-agent', ...) with the full patch text above. "
+            f"last {commit_offset} commits in the repository at {resolved_path}.\n\n"
+            f"The git patch has been saved to: {patch_file_posix}\n\n"
+            "IMPORTANT: You MUST call task(name='summary-agent', ...) and "
+            "task(name='implications-agent', ...) — pass the patch file path above "
+            "in each task string. The subagents will read the file themselves. "
             "Only after receiving both outputs should you write the final Markdown PR. "
-            "Do NOT skip the subagent calls."
+            "Do NOT skip the subagent calls and do NOT read the file yourself."
         ),
     }
 
@@ -169,6 +177,10 @@ def main() -> None:
             len(tool_calls) if tool_calls else 0,
         )
         LOG.debug("message[%d] content preview: %s", i, _content_repr(content))
+        if isinstance(msg, ToolMessage):
+            tool_name = getattr(msg, "name", "?")
+            LOG.debug("ToolMessage[%d] name=%s content_len=%s", i, tool_name,
+                      len(content) if isinstance(content, str) else 0)
         if isinstance(msg, AIMessage):
             txt = _get_ai_content(msg)
             LOG.info("AIMessage[%d] extracted length=%d tool_calls=%s", i, len(txt), bool(tool_calls))

@@ -14,3 +14,6 @@ wheels/
 # Logs
 goodpr.log
 *.log
+
+# Patch file
+patch_context.txt
