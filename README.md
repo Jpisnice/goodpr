@@ -44,25 +44,28 @@ Output is written to stdout as Markdown, suitable for pasting directly into a Gi
 flowchart TD
     CLI["CLI\nmain.py"]
     Git["git format-patch\nHEAD~N..HEAD"]
-    Condense["condense_patch()\nKeep headers + stats\nTruncate diff hunks"]
-    File["patch_context.txt\n~60KB condensed patch"]
+    File["patch_context.txt\nraw patch"]
+    BuildIndex["build_patch_index()\nchunk by file, BM25"]
+    Index["BM25 index\nin-memory"]
     Main["Main Agent\nGemini 2.5 Flash"]
-    SumAgent["summary-agent\nreads patch via read_patch_file()"]
-    ImplAgent["implications-agent\nreads patch via read_patch_file()"]
+    SumAgent["summary-agent\nread_patch_file + search_patch"]
+    ImplAgent["implications-agent\nread_patch_file + search_patch"]
     SumOut["TITLE / SUMMARY\nFILES / CHANGE_TYPES"]
     ImplOut["BREAKING / MIGRATIONS\nDEPS_CONFIG / TESTING / RISK"]
     PR["Final PR\nMarkdown output"]
 
     CLI --> Git
-    Git --> Condense
-    Condense --> File
-    File --> Main
+    Git --> File
+    File --> BuildIndex
+    BuildIndex --> Index
     Main -->|"task() STEP 1"| SumAgent
     SumAgent -->|"read_patch_file(path)"| File
+    SumAgent -->|"search_patch(query)"| Index
     SumAgent --> SumOut
     SumOut --> Main
     Main -->|"task() STEP 2"| ImplAgent
     ImplAgent -->|"read_patch_file(path)"| File
+    ImplAgent -->|"search_patch(query)"| Index
     ImplAgent --> ImplOut
     ImplOut --> Main
     Main -->|"STEP 3 compose"| PR
@@ -70,7 +73,8 @@ flowchart TD
 
 ### Key design decisions
 
-- **Patch condensation** — `condense_patch()` strips raw diff lines (keeping only 30 per hunk) so the patch stays under DeepAgents' ~80KB context-offload threshold before subagents read it.
-- **File-based handoff** — the patch is written to `patch_context.txt` and subagents read it via a `read_patch_file` tool. This avoids asking the main agent to copy hundreds of KB into a `task()` call argument.
+- **Raw patch on disk** — the full patch is written to `patch_context.txt`. Subagents get a condensed overview via `read_patch_file()` (which uses `condense_patch()`: 30 lines per hunk, ~60KB cap) so the content stays under DeepAgents' context-offload threshold.
+- **BM25 search** — at startup, the raw patch is chunked per-file-per-commit and indexed with BM25. Subagents use `search_patch(query)` to retrieve relevant chunks (e.g. by file name, function, or keyword) and can analyze the full patch without loading it all at once.
+- **File-based handoff** — the patch path is passed in the user message and to `build_pr_agent()`; subagents read and search it via tools. This avoids the main agent copying hundreds of KB into `task()` arguments.
 - **Structured subagent output** — each subagent returns a fixed labeled format (`TITLE:`, `SUMMARY:`, `BREAKING:`, `RISK:`, etc.) so the main agent can compose the final PR deterministically.
 - **Skills** — PR writing guidelines are loaded from `skills/pr/SKILL.md` at runtime.
