@@ -6,6 +6,7 @@ from deepagents import create_deep_agent
 from langgraph.checkpoint.memory import MemorySaver
 
 from tools.git_tools import condense_patch
+from tools.patch_retriever import build_patch_index, make_search_tool
 
 
 def read_patch_file(path: str) -> str:
@@ -23,17 +24,23 @@ def read_patch_file(path: str) -> str:
     return condense_patch(raw)
 
 
-def build_pr_agent():
+def build_pr_agent(patch_path: str | None = None):
     """
     Create the Deep Agent configured for PR generation from git patch history.
 
     - Uses Gemini via the `google_genai:gemini-2.5-flash-lite` identifier.
     - Patch context is provided directly in the user message.
-    - Two subagents (no tools): summary-agent and implications-agent receive the
-      entire patch content in the task string and analyze it using Gemini's
-      large context window.
+    - Two subagents receive read_patch_file and search_patch tools; they load the
+      patch (condensed) and can search the full patch for specific context.
     - Loads the PR-writing skill from `skills/pr/`.
     """
+    if patch_path:
+        search_patch = make_search_tool(build_patch_index(patch_path))
+    else:
+
+        def search_patch(query: str, k: int = 5) -> str:
+            return "Patch path not provided; search unavailable."
+
     summary_subagent = {
         "name": "summary-agent",
         "description": (
@@ -47,14 +54,20 @@ def build_pr_agent():
             "reviewer-friendly descriptions.\n\n"
             "Your task string contains a file path to a git patch file. "
             "Your FIRST action must be to call read_patch_file(path=<the path from your task>) "
-            "to load the patch content. Then analyze it and return your response in this EXACT format:\n\n"
+            "to load a condensed overview of the patch (commit headers, file list, and truncated hunks). "
+            "This overview is intentionally shortened; the full patch is available via search. "
+            "You MUST then use search_patch(query='...') to look up specific files, modules, or "
+            "keywords when you need detail (e.g. search_patch('page.tsx'), search_patch('API'), "
+            "search_patch('test')). Do NOT respond that the file is truncated or that you cannot "
+            "analyze — produce your output using the overview plus targeted search_patch calls. "
+            "Then return your response in this EXACT format:\n\n"
             "TITLE: <one-line PR title>\n"
             "SUMMARY: <2-4 sentences describing what changed and why>\n"
             "FILES: <comma-separated list of the most important files changed>\n"
             "CHANGE_TYPES: <comma-separated labels: feature, fix, refactor, docs, test, chore>\n\n"
             "Keep your total response under 300 words. Do not add extra sections."
         ),
-        "tools": [read_patch_file],
+        "tools": [read_patch_file, search_patch],
     }
 
     implications_subagent = {
@@ -69,7 +82,13 @@ def build_pr_agent():
             "You analyze the impact and risk of code changes.\n\n"
             "Your task string contains a file path to a git patch file. "
             "Your FIRST action must be to call read_patch_file(path=<the path from your task>) "
-            "to load the patch content. Then analyze it and return your response in this EXACT format:\n\n"
+            "to load a condensed overview of the patch (commit headers, file list, truncated hunks). "
+            "This overview is intentionally shortened; the full patch is available via search. "
+            "You MUST use search_patch(query='...') to look up specific files or topics when you "
+            "need detail (e.g. search_patch('breaking'), search_patch('config'), search_patch('test'), "
+            "search_patch('migration')). Do NOT respond that the file is truncated or that you cannot "
+            "analyze — produce your output using the overview plus targeted search_patch calls. "
+            "Then return your response in this EXACT format:\n\n"
             "BREAKING: <bullet list of breaking changes, or 'None'>\n"
             "MIGRATIONS: <bullet list of required migration steps, or 'None'>\n"
             "DEPS_CONFIG: <bullet list of dependency or config changes, or 'None'>\n"
@@ -77,7 +96,7 @@ def build_pr_agent():
             "RISK: <low | medium | high>\n\n"
             "Keep your total response under 300 words. Do not add extra sections."
         ),
-        "tools": [read_patch_file],
+        "tools": [read_patch_file, search_patch],
     }
 
     system_prompt = (

@@ -111,7 +111,7 @@ def main() -> None:
     patch_file_posix = patch_file.as_posix()
     LOG.info("Patch written to %s", patch_file_posix)
 
-    agent = build_pr_agent()
+    agent = build_pr_agent(patch_path=patch_file_posix)
 
     thread_id = args.thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
@@ -124,7 +124,8 @@ def main() -> None:
             f"The git patch has been saved to: {patch_file_posix}\n\n"
             "IMPORTANT: You MUST call task(name='summary-agent', ...) and "
             "task(name='implications-agent', ...) — pass the patch file path above "
-            "in each task string. The subagents will read the file themselves. "
+            "in each task string. The subagents will read the file themselves and can "
+            "use search_patch to look up specific files, functions, or patterns in the patch. "
             "Only after receiving both outputs should you write the final Markdown PR. "
             "Do NOT skip the subagent calls and do NOT read the file yourself."
         ),
