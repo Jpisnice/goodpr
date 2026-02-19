@@ -28,7 +28,7 @@ def build_pr_agent(patch_path: str | None = None):
     """
     Create the Deep Agent configured for PR generation from git patch history.
 
-    - Uses Gemini via the `google_genai:gemini-2.5-flash-lite` identifier.
+    - Uses Gemini via the `google_genai:gemini-3-flash-preview` identifier.
     - Patch context is provided directly in the user message.
     - Two subagents receive read_patch_file and search_patch tools; they load the
       patch (condensed) and can search the full patch for specific context.
@@ -120,7 +120,7 @@ def build_pr_agent(patch_path: str | None = None):
     checkpointer = MemorySaver()
 
     agent = create_deep_agent(
-        model="google_genai:gemini-2.5-flash-lite",
+        model="google_genai:gemini-3-flash-preview",
         system_prompt=system_prompt,
         subagents=[summary_subagent, implications_subagent],
         skills=["skills/pr/"],

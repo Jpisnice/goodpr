@@ -47,7 +47,7 @@ flowchart TD
     File["patch_context.txt\nraw patch"]
     BuildIndex["build_patch_index()\nchunk by file, BM25"]
     Index["BM25 index\nin-memory"]
-    Main["Main Agent\nGemini 2.5 Flash"]
+    Main["Main Agent\nGemini 3 Flash"]
     SumAgent["summary-agent\nread_patch_file + search_patch"]
     ImplAgent["implications-agent\nread_patch_file + search_patch"]
     SumOut["TITLE / SUMMARY\nFILES / CHANGE_TYPES"]
