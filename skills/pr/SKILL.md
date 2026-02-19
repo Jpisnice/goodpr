@@ -61,7 +61,10 @@ version: 0.1.0
 
 When this skill is active:
 
-1. Read the available git patch and any structured summaries.
+1. Use the available tools (such as `search_patch(query)`) and any structured
+   summaries to pull out the most relevant parts of the git patch. Issue
+   multiple targeted searches (e.g. for key files, features, tests, config,
+   and migrations) rather than relying on a single long diff.
 2. Identify:
    - The main user-facing changes.
    - Important internal refactors worth mentioning.

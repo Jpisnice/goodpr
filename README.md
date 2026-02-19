@@ -48,8 +48,8 @@ flowchart TD
     BuildIndex["build_patch_index()\nchunk by file, BM25"]
     Index["BM25 index\nin-memory"]
     Main["Main Agent\nGemini 3 Flash"]
-    SumAgent["summary-agent\nread_patch_file + search_patch"]
-    ImplAgent["implications-agent\nread_patch_file + search_patch"]
+    SumAgent["summary-agent\nsearch_patch() only"]
+    ImplAgent["implications-agent\nsearch_patch() only"]
     SumOut["TITLE / SUMMARY\nFILES / CHANGE_TYPES"]
     ImplOut["BREAKING / MIGRATIONS\nDEPS_CONFIG / TESTING / RISK"]
     PR["Final PR\nMarkdown output"]
@@ -59,12 +59,10 @@ flowchart TD
     File --> BuildIndex
     BuildIndex --> Index
     Main -->|"task() STEP 1"| SumAgent
-    SumAgent -->|"read_patch_file(path)"| File
     SumAgent -->|"search_patch(query)"| Index
     SumAgent --> SumOut
     SumOut --> Main
     Main -->|"task() STEP 2"| ImplAgent
-    ImplAgent -->|"read_patch_file(path)"| File
     ImplAgent -->|"search_patch(query)"| Index
     ImplAgent --> ImplOut
     ImplOut --> Main
@@ -73,8 +71,8 @@ flowchart TD
 
 ### Key design decisions
 
-- **Raw patch on disk** — the full patch is written to `patch_context.txt`. Subagents get a condensed overview via `read_patch_file()` (which uses `condense_patch()`: 30 lines per hunk, ~60KB cap) so the content stays under DeepAgents' context-offload threshold.
-- **BM25 search** — at startup, the raw patch is chunked per-file-per-commit and indexed with BM25. Subagents use `search_patch(query)` to retrieve relevant chunks (e.g. by file name, function, or keyword) and can analyze the full patch without loading it all at once.
-- **File-based handoff** — the patch path is passed in the user message and to `build_pr_agent()`; subagents read and search it via tools. This avoids the main agent copying hundreds of KB into `task()` arguments.
+- **Raw patch on disk** — the full patch is written to `patch_context.txt` (capped at ~500KB from `git format-patch`). Subagents do **not** read this file directly; they only see patch content via search results.
+- **BM25 search only** — at startup, the raw patch is chunked per-file-per-commit and indexed with BM25. Subagents use `search_patch(query)` to retrieve relevant chunks (e.g. by file name, function, or keyword) and can analyze the full patch without loading it all at once.
+- **File-based handoff** — the patch path is passed in the user message and to `build_pr_agent()` so the BM25 index can be built. After that, all patch access is through the `search_patch` tool, not direct file reads.
 - **Structured subagent output** — each subagent returns a fixed labeled format (`TITLE:`, `SUMMARY:`, `BREAKING:`, `RISK:`, etc.) so the main agent can compose the final PR deterministically.
 - **Skills** — PR writing guidelines are loaded from `skills/pr/SKILL.md` at runtime.

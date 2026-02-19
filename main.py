@@ -107,7 +107,7 @@ def main() -> None:
     patch_file.write_text(patch_context, encoding="utf-8")
     # Use forward slashes so the path survives intact through LLM tool call arguments
     # on Windows (backslashes get treated as escape sequences when the model serialises
-    # the task() string and read_patch_file receives a mangled path).
+    # the task() string and tools that use the path receive a mangled value).
     patch_file_posix = patch_file.as_posix()
     LOG.info("Patch written to %s", patch_file_posix)
 

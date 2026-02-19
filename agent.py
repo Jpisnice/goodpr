@@ -1,27 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from deepagents import create_deep_agent
 from langgraph.checkpoint.memory import MemorySaver
 
-from tools.git_tools import condense_patch
 from tools.patch_retriever import build_patch_index, make_search_tool
-
-
-def read_patch_file(path: str) -> str:
-    """Read and condense the git patch file so the result fits within the subagent
-    context window without triggering DeepAgents' filesystem offload.
-
-    The condenser keeps all commit headers, file stats, and @@ hunk headers verbatim,
-    but truncates individual diff hunks to 30 lines. This preserves all information
-    needed to write a quality PR description.
-
-    Args:
-        path: Absolute POSIX path to the patch file written by the orchestrator.
-    """
-    raw = Path(path).read_text(encoding="utf-8")
-    return condense_patch(raw)
 
 
 def build_pr_agent(patch_path: str | None = None):
@@ -29,9 +11,10 @@ def build_pr_agent(patch_path: str | None = None):
     Create the Deep Agent configured for PR generation from git patch history.
 
     - Uses Gemini via the `google_genai:gemini-3-flash-preview` identifier.
-    - Patch context is provided directly in the user message.
-    - Two subagents receive read_patch_file and search_patch tools; they load the
-      patch (condensed) and can search the full patch for specific context.
+    - The full git patch is written to disk; an in-memory BM25 index is built
+      over that patch and exposed via a `search_patch(query, k)` tool.
+    - Subagents ONLY access patch content through `search_patch` (no direct
+      file reads or condensed views).
     - Loads the PR-writing skill from `skills/pr/`.
     """
     if patch_path:
@@ -45,49 +28,55 @@ def build_pr_agent(patch_path: str | None = None):
         "name": "summary-agent",
         "description": (
             "ALWAYS call this subagent FIRST before writing any PR. "
-            "It reads git patch text and returns: a PR title, a 2-4 sentence summary, "
-            "a list of key files changed, and the main change types (feature/fix/refactor/docs). "
+            "It analyzes git patch text via search_patch() and returns: a PR title, "
+            "a 2-4 sentence summary, a list of key files changed, and the main change "
+            "types (feature/fix/refactor/docs). "
             "Do NOT write the PR without calling this first."
         ),
         "system_prompt": (
             "You are a specialist in summarizing git patches into concise, "
             "reviewer-friendly descriptions.\n\n"
-            "Your task string contains a file path to a git patch file. "
-            "Your FIRST action must be to call read_patch_file(path=<the path from your task>) "
-            "to load a condensed overview of the patch (commit headers, file list, and truncated hunks). "
-            "This overview is intentionally shortened; the full patch is available via search. "
-            "You MUST then use search_patch(query='...') to look up specific files, modules, or "
-            "keywords when you need detail (e.g. search_patch('page.tsx'), search_patch('API'), "
-            "search_patch('test')). Do NOT respond that the file is truncated or that you cannot "
-            "analyze — produce your output using the overview plus targeted search_patch calls. "
-            "Then return your response in this EXACT format:\n\n"
+            "Your task string contains a file path to a git patch file that has "
+            "already been indexed into an in-memory BM25 retriever. You MUST use "
+            "search_patch(query='...') to explore this patch. Start by calling "
+            "search_patch several times with different queries derived from the "
+            "task (e.g. key modules, components, 'feature', 'fix', 'test', "
+            "important filenames) to build an understanding of what changed.\n\n"
+            "NEVER claim that the patch is truncated or that you cannot analyze it. "
+            "If you need more detail about a specific file, function, or concept, "
+            "refine your queries and call search_patch again.\n\n"
+            "After gathering enough context, return your response in this EXACT format:\n\n"
             "TITLE: <one-line PR title>\n"
             "SUMMARY: <2-4 sentences describing what changed and why>\n"
             "FILES: <comma-separated list of the most important files changed>\n"
             "CHANGE_TYPES: <comma-separated labels: feature, fix, refactor, docs, test, chore>\n\n"
             "Keep your total response under 300 words. Do not add extra sections."
         ),
-        "tools": [read_patch_file, search_patch],
+        "tools": [search_patch],
     }
 
     implications_subagent = {
         "name": "implications-agent",
         "description": (
             "ALWAYS call this subagent SECOND before writing any PR. "
-            "It reads git patch text and returns: breaking changes, migration steps, "
-            "dependency/config changes, testing evidence, and risk level. "
+            "It analyzes git patch text via search_patch() and returns: breaking "
+            "changes, migration steps, dependency/config changes, testing evidence, "
+            "and risk level. "
             "Do NOT write the PR without calling this first."
         ),
         "system_prompt": (
             "You analyze the impact and risk of code changes.\n\n"
-            "Your task string contains a file path to a git patch file. "
-            "Your FIRST action must be to call read_patch_file(path=<the path from your task>) "
-            "to load a condensed overview of the patch (commit headers, file list, truncated hunks). "
-            "This overview is intentionally shortened; the full patch is available via search. "
-            "You MUST use search_patch(query='...') to look up specific files or topics when you "
-            "need detail (e.g. search_patch('breaking'), search_patch('config'), search_patch('test'), "
-            "search_patch('migration')). Do NOT respond that the file is truncated or that you cannot "
-            "analyze — produce your output using the overview plus targeted search_patch calls. "
+            "Your task string contains a file path to a git patch file that has "
+            "already been indexed into an in-memory BM25 retriever. You MUST use "
+            "search_patch(query='...') to explore this patch. Call search_patch "
+            "with targeted queries to discover:\n"
+            "- Possible breaking changes (e.g. search_patch('breaking'), 'delete', 'remove', 'rename').\n"
+            "- Migrations and data changes (e.g. 'migration', 'schema', 'migrate').\n"
+            "- Dependency or config changes (e.g. 'pyproject.toml', 'package.json', 'env', 'config').\n"
+            "- Tests and validation (e.g. 'test', 'spec', 'assert', 'e2e').\n\n"
+            "Refine your queries as needed. NEVER claim that the patch is truncated "
+            "or that you cannot analyze it; instead, issue more search_patch calls "
+            "until you have enough evidence.\n\n"
             "Then return your response in this EXACT format:\n\n"
             "BREAKING: <bullet list of breaking changes, or 'None'>\n"
             "MIGRATIONS: <bullet list of required migration steps, or 'None'>\n"
@@ -96,19 +85,21 @@ def build_pr_agent(patch_path: str | None = None):
             "RISK: <low | medium | high>\n\n"
             "Keep your total response under 300 words. Do not add extra sections."
         ),
-        "tools": [read_patch_file, search_patch],
+        "tools": [search_patch],
     }
 
     system_prompt = (
         "You are a PR generation assistant. You MUST follow these steps in order "
         "and MUST NOT skip any step:\n\n"
         "STEP 1 — MANDATORY: The user message contains a file path to the git patch. "
-        "Call task(name='summary-agent', task='Read the patch file at <path> and summarize it.') "
-        "where <path> is the exact file path from the user message. "
-        "The subagent has a read_patch_file tool and will load the file itself. "
+        "Call task(name='summary-agent', task='Analyze the patch at <path> using search_patch "
+        "to retrieve relevant chunks and summarize it.') where <path> is the exact file "
+        "path from the user message. The subagent has a search_patch tool that queries "
+        "an index built from this file; it MUST NOT try to read the file itself. "
         "Wait for the result before proceeding.\n\n"
-        "STEP 2 — MANDATORY: Call task(name='implications-agent', task='Read the patch file at <path> and analyze its implications.') "
-        "with the same file path. "
+        "STEP 2 — MANDATORY: Call task(name='implications-agent', task='Analyze the patch at <path> "
+        "using search_patch to understand breaking changes, migrations, config/dependency changes, "
+        "testing, and risk.') with the same file path. "
         "Wait for the result before proceeding.\n\n"
         "STEP 3: Use the outputs from BOTH subagents to compose the final PR "
         "description in Markdown with these headings: ## Summary, ## Changes, "
