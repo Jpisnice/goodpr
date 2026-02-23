@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -86,6 +87,16 @@ def main() -> None:
     log_path = Path(args.log_file)
     setup_logging(log_path)
     LOG.info("Logging to %s", log_path)
+
+    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")) or ""
+    if not api_key.strip():
+        msg = (
+            "GOOGLE_API_KEY is not set or is empty. Set it in the environment or in a .env file, then run again. run 'export GOOGLE_API_KEY=your_key_here' to set the key in the environment."
+                
+        )
+        LOG.error(msg)
+        print(msg, file=sys.stderr)
+        sys.exit(1)
 
     repo_path = args.repo_path
     commit_offset = args.commit_offset
